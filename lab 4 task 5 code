@@ -44,6 +44,7 @@ UnbufferedSerial uartUsb(USBTX, USBRX, 115200);
 
 AnalogIn potentiometer(A0);
 AnalogIn lm35(A1);
+AnalogIn gas(A2);
 
 
 //=====[Declaration and initialization of public global variables]=============
@@ -121,8 +122,8 @@ void inputsInit()
     bButton.mode(PullDown);
     cButton.mode(PullDown);
     dButton.mode(PullDown);
-    // sirenPin.mode(PullDown);
-    // sirenPin.output();
+   sirenPin.mode(OpenDrain);
+    sirenPin.input();
 }
 
 
@@ -139,20 +140,22 @@ void alarmActivationUpdate()
     static int lm35SampleIndex = 0;
     int i = 0;
 
-
+    
     lm35ReadingsArray[lm35SampleIndex] = lm35.read();
     lm35SampleIndex++;
     if ( lm35SampleIndex >= NUMBER_OF_AVG_SAMPLES) {
         lm35SampleIndex = 0;
     }
-   
+  
        lm35ReadingsSum = 0.0;
     for (i = 0; i < NUMBER_OF_AVG_SAMPLES; i++) {
         lm35ReadingsSum = lm35ReadingsSum + lm35ReadingsArray[i];
     }
     lm35ReadingsAverage = lm35ReadingsSum / NUMBER_OF_AVG_SAMPLES;
        lm35TempC = analogReadingScaledWithTheLM35Formula ( lm35ReadingsAverage );    
-   
+   if(aButton){
+       lm35TempC=1000;
+   }
     if ( lm35TempC > potentiometerReading ) {
         overTempDetector = ON;
     } else {
@@ -160,9 +163,11 @@ void alarmActivationUpdate()
     }
 
 
-    if( !mq2) {
+    if( gas.read()>(potentiometerReading/182)) {
         gasDetectorState = ON;
-        alarmState = ON;
+       
+    }else {
+         gasDetectorState = OFF;
     }
     if( overTempDetector ) {
        
@@ -194,8 +199,8 @@ void alarmActivationUpdate()
               message=message+1;
        }
        
-        sirenPin.mode(PullDown);                                    
-        sirenPin = LOW;                                        
+       sirenPin.output();                                     
+                    sirenPin = LOW;                                           
    
         if( gasDetectorState && overTempDetectorState ) {
             if( accumulatedTimeAlarm >= BLINKING_TIME_GAS_AND_OVER_TEMP_ALARM ) {
@@ -212,9 +217,16 @@ void alarmActivationUpdate()
                
             }
         } else if ( overTempDetectorState ) {
+            int strlen=0;
+             char str[100];
             if( accumulatedTimeAlarm >= BLINKING_TIME_OVER_TEMP_ALARM  ) {
                  uartUsb.write( "Temperature Warning\r\n", 21 );
-               
+               sprintf ( str, "Temperature: %.2f °C\r\n", lm35TempC );
+            int strlen=0;
+            for(int i=0;str[i]!=NULL;i++){
+                  strlen=strlen+1;
+            }
+            uartUsb.write( str, strlen );
                 accumulatedTimeAlarm = 0;
                 alarmLed = !alarmLed;
                  
@@ -224,7 +236,7 @@ void alarmActivationUpdate()
         alarmLed = OFF;
         gasDetectorState = OFF;
         overTempDetectorState = OFF;
-        sirenPin.mode(OpenDrainNoPull);
+          sirenPin.input();
         if(normal==0){
          uartUsb.write( "system normal\r\n", 15 );
           normal=normal+1;
@@ -408,9 +420,11 @@ void uartTask()
 
 
             if ( !mq2 ) {
+                 
                 uartUsb.write( "Gas is being detected\r\n", 22);
             } else {
-                uartUsb.write( "Gas is not being detected\r\n", 27);
+               uartUsb.write( "Gas is not being detected\r\n", 26);
+                
             }
              if( uartUsb.readable() ) {
         uartUsb.read( &receivedChar, 1 );
@@ -519,7 +533,7 @@ bool areEqual()
 
 float analogReadingScaledWithTheLM35Formula( float analogReading )
 {
-    return ( analogReading * 3.3 / 0.01 );
+    return ( analogReading * 3.3 / 0.01-35 );
 }
 
 
