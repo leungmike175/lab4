@@ -13,7 +13,7 @@
 #define BLINKING_TIME_GAS_ALARM               1000
 #define BLINKING_TIME_OVER_TEMP_ALARM          500
 #define BLINKING_TIME_GAS_AND_OVER_TEMP_ALARM  100
-#define NUMBER_OF_AVG_SAMPLES                   100
+#define NUMBER_OF_AVG_SAMPLES                   1000
 #define OVER_TEMP_LEVEL                         50
 #define TIME_INCREMENT_MS                       10
 #define blink 200ms
@@ -28,7 +28,7 @@ DigitalIn aButton(D4);
 DigitalIn bButton(D5);
 DigitalIn cButton(D6);
 DigitalIn dButton(D7);
-DigitalIn mq2(PE_12);
+
 
 
 DigitalOut alarmLed(LED1);
@@ -44,7 +44,7 @@ UnbufferedSerial uartUsb(USBTX, USBRX, 115200);
 
 AnalogIn potentiometer(A0);
 AnalogIn lm35(A1);
-AnalogIn gas(A2);
+AnalogIn mq2(A2);
 
 
 //=====[Declaration and initialization of public global variables]=============
@@ -52,8 +52,9 @@ AnalogIn gas(A2);
 
 bool alarmState    = OFF;
 bool incorrectCode = false;
+bool overgas = OFF;
 bool overTempDetector = OFF;
-
+char pcSerialComCharRead;
 
 int numberOfIncorrectCodes = 0;
 int buttonBeingCompared    = 0;
@@ -89,8 +90,8 @@ void availableCommands();
 bool areEqual();
 float celsiusToFahrenheit( float tempInCelsiusDegrees );
 float analogReadingScaledWithTheLM35Formula( float analogReading );
-int message=0, normal=0;
-
+int message=0,message1=0,message2=0, normal=0;
+float metersum = 0.0;
 
 //=====[Main function, the program entry point after power on or reset]========
 
@@ -137,65 +138,75 @@ void outputsInit()
 
 void alarmActivationUpdate()
 {
-    static int lm35SampleIndex = 0;
-    int i = 0;
-
+      lm35ReadingsSum = 0.0;
+    for (int i = 0; i < 1000; i++) {
+        lm35ReadingsArray[i] = lm35.read()  / 0.01;
+        lm35ReadingsSum = lm35ReadingsSum + lm35ReadingsArray[i]/1000;
+    }  
     
-    lm35ReadingsArray[lm35SampleIndex] = lm35.read();
-    lm35SampleIndex++;
-    if ( lm35SampleIndex >= NUMBER_OF_AVG_SAMPLES) {
-        lm35SampleIndex = 0;
-    }
+    
   
-       lm35ReadingsSum = 0.0;
-    for (i = 0; i < NUMBER_OF_AVG_SAMPLES; i++) {
-        lm35ReadingsSum = lm35ReadingsSum + lm35ReadingsArray[i];
-    }
-    lm35ReadingsAverage = lm35ReadingsSum / NUMBER_OF_AVG_SAMPLES;
-       lm35TempC = analogReadingScaledWithTheLM35Formula ( lm35ReadingsAverage );    
-   if(aButton){
-       lm35TempC=1000;
-   }
-    if ( lm35TempC > potentiometerReading ) {
+      
+ 
+    if (lm35ReadingsSum > potentiometerReading) {
         overTempDetector = ON;
     } else {
         overTempDetector = OFF;
     }
 
 
-    if( gas.read()>(potentiometerReading/182)) {
-        gasDetectorState = ON;
-       
+    if(  mq2.read()>(potentiometerReading/250)) {
+        overgas = ON;
+        
     }else {
-         gasDetectorState = OFF;
+         overgas = OFF;
     }
+
     if( overTempDetector ) {
        
         overTempDetectorState = ON;
         alarmState = ON;
     }
     else{
-        overTempDetectorState = OFF;
-        alarmState = OFF;
+         overTempDetectorState = OFF;
+        
     }
+   
+
+     if( overgas) {
+       
+         gasDetectorState = ON;
+        alarmState = ON;
+    }
+     else{
+
+         gasDetectorState = OFF;
+     
+    }
+     
+    
     if( alarmTestButton ) {            
         overTempDetectorState = ON;
         gasDetectorState = ON;
         alarmState = ON;
     }    
    
-    if( alarmState ) {
+   if( alarmState ) {
         normal=0;
         accumulatedTimeAlarm = accumulatedTimeAlarm + TIME_INCREMENT_MS;
         char receivedChar = '\0';
-        if(uartUsb.readable() ){
-         uartUsb.read( &receivedChar, 1 );
-         if(receivedChar!=NULL){
-             receivedChar=NULL;
-         }
-        }
+       uartUsb.write( "Enter 3-Digit Code to Deactivate", 35 );
        if(message==0){
               uartUsb.write( "Buzzer ON-Cause:[Temperature/Gas]\r\n", 35 );
+              if( gasDetectorState ) {
+                  uartUsb.write( "Gas Warning\r\n", 13 );
+              }
+              if ( overTempDetectorState ) {
+                  int strlen=0;
+             char str[100];
+                   uartUsb.write( "Temperature Warning\r\n", 21 );
+              
+              }
               message=message+1;
        }
        
@@ -217,31 +228,29 @@ void alarmActivationUpdate()
                
             }
         } else if ( overTempDetectorState ) {
-            int strlen=0;
-             char str[100];
+            
             if( accumulatedTimeAlarm >= BLINKING_TIME_OVER_TEMP_ALARM  ) {
-                 uartUsb.write( "Temperature Warning\r\n", 21 );
-               sprintf ( str, "Temperature: %.2f °C\r\n", lm35TempC );
-            int strlen=0;
-            for(int i=0;str[i]!=NULL;i++){
-                  strlen=strlen+1;
-            }
-            uartUsb.write( str, strlen );
+               
                 accumulatedTimeAlarm = 0;
                 alarmLed = !alarmLed;
                  
             }
         }
-    } else if( !gasDetectorState && !overTempDetectorState ){
+        else{
+             alarmState=OFF;
+        }
+    }
+   
+   else if( !gasDetectorState && !overTempDetectorState ){
         alarmLed = OFF;
         gasDetectorState = OFF;
         overTempDetectorState = OFF;
           sirenPin.input();
         if(normal==0){
          uartUsb.write( "system normal\r\n", 15 );
-          normal=normal+1;
+          normal++;
        }
-       message=0;      
+       message=message1=message2=0;      
     }
 }
 
@@ -276,6 +285,7 @@ void uartTask()
     char receivedChar = '\0';
     char str[100];
     int stringLength;
+ if(!alarmState){
     if( uartUsb.readable() ) {
         uartUsb.read( &receivedChar, 1 );
         switch (receivedChar) {
@@ -400,6 +410,8 @@ void uartTask()
                   strlen=strlen+1;
             }
             uartUsb.write( str, strlen );
+           
+            
              if( uartUsb.readable() ) {
         uartUsb.read( &receivedChar, 1 );
             if(receivedChar == 'p'){
@@ -416,16 +428,29 @@ void uartTask()
          case 'g':
         case 'G':
         while(true){
+              int strlen=0;
+             char str[100];
             ThisThread::sleep_for(blink);
+       
 
-
-            if ( !mq2 ) {
-                 
-                uartUsb.write( "Gas is being detected\r\n", 22);
-            } else {
-               uartUsb.write( "Gas is not being detected\r\n", 26);
+          
                 
+                  
+               sprintf ( str, "gas: %.2f \r\n", mq2.read() );
+            
+            for(int i=0;str[i]!=NULL;i++){
+                  strlen=strlen+1;
             }
+            uartUsb.write( str, strlen );
+            if( mq2.read()>(potentiometerReading/250)) {
+        uartUsb.write( "Gas is  being detected\r\n", 28);
+        
+    }else {
+         uartUsb.write( "Gas is not being detected\r\n", 28);
+    }
+               
+                
+            
              if( uartUsb.readable() ) {
         uartUsb.read( &receivedChar, 1 );
             if(receivedChar == 'g'){
@@ -440,11 +465,19 @@ void uartTask()
 
         case 'c':
         case 'C':
+        
         while(true){
             ThisThread::sleep_for(blink);
+    
+       lm35ReadingsSum = 0.0;
+    for (int i = 0; i < 1000; i++) {
+        lm35ReadingsArray[i] = lm35.read()  / 0.01;
+        lm35ReadingsSum = lm35ReadingsSum + lm35ReadingsArray[i]/1000;
+    }
+  
+        
 
-
-            sprintf ( str, "Temperature: %.2f °C\r\n", lm35TempC );
+            sprintf ( str, "Temperature: %.2f °C\r\n", lm35ReadingsSum );
             int strlen=0;
             for(int i=0;str[i]!=NULL;i++){
                   strlen=strlen+1;
@@ -461,15 +494,13 @@ void uartTask()
 
 
         }
-            break;
+          break; 
 
 
         case 'f':
         case 'F':
-        while(true){
-        ThisThread::sleep_for(blink);
-
-
+         while(true){
+         ThisThread::sleep_for(blink);
             sprintf ( str, "Temperature: %.2f °F\r\n",
                 celsiusToFahrenheit( lm35TempC ) );
            int strlen=0;
@@ -485,12 +516,8 @@ void uartTask()
                    
             }
             }
-
-
-        }
-            break;
-
-
+         }
+         break;
         default:
             availableCommands();
             break;
@@ -498,6 +525,10 @@ void uartTask()
 
         }
     }
+ }
+ else{
+     NULL;
+ }
 }
 
 
@@ -532,8 +563,9 @@ bool areEqual()
 
 
 float analogReadingScaledWithTheLM35Formula( float analogReading )
-{
-    return ( analogReading * 3.3 / 0.01-35 );
+{ 
+      
+    return (( analogReading * 3.3 / 0.01) );
 }
 
 
