@@ -195,7 +195,7 @@ void alarmActivationUpdate()
         normal=0;
         accumulatedTimeAlarm = accumulatedTimeAlarm + TIME_INCREMENT_MS;
         char receivedChar = '\0';
-       uartUsb.write( "Enter 3-Digit Code to Deactivate", 35 );
+      
        if(message==0){
               uartUsb.write( "Buzzer ON-Cause:[Temperature/Gas]\r\n", 35 );
               if( gasDetectorState ) {
